@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Dart Scoreboard</title>
+    <style>
+        :root {
+            --bg: #121212;
+            --card: #1e1e1e;
+            --accent: #00e676;
+            --text: #ffffff;
+        }
+        body { 
+            font-family: 'Segoe UI', Roboto, sans-serif; 
+            text-align: center; 
+            background: var(--bg); 
+            color: var(--text); 
+            margin: 0; 
+            padding: 20px;
+        }
+        .container { max-width: 600px; margin: auto; }
+        #status { 
+            color: var(--accent); 
+            min-height: 50px; 
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .scoreboard { 
+            display: flex; 
+            flex-wrap: wrap; 
+            justify-content: center; 
+            gap: 15px; 
+        }
+        .player-card { 
+            background: var(--card);
+            border: 2px solid #333; 
+            padding: 20px; 
+            border-radius: 12px;
+            min-width: 120px;
+            transition: all 0.3s;
+        }
+        .active { 
+            border-color: var(--accent); 
+            box-shadow: 0 0 15px rgba(0, 230, 118, 0.3);
+            transform: scale(1.05);
+        }
+        .score { font-size: 2.5em; font-weight: bold; margin: 10px 0; }
+        button { 
+            background: var(--accent); 
+            border: none; 
+            padding: 20px 40px; 
+            font-size: 1.2em; 
+            border-radius: 50px; 
+            color: #000; 
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        button:active { transform: translateY(2px); }
+        #log { font-size: 0.9em; color: #888; margin-top: 30px; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🎯 Dart Voice Master</h1>
+    
+    <div id="status">Bereit? Drücke den Button und sag "Start" oder die Spieleranzahl.</div>
+    
+    <button id="micBtn">🎙️ Sprechen</button>
+
+    <div id="scoreboard" class="scoreboard" style="margin-top: 30px;"></div>
+    
+    <div id="log">Warte auf Spracheingabe...</div>
+</div>
+
+<script>
+    // Spiel-Logik
+    let players = [];
+    let currentPlayerIndex = 0;
+    let gameState = "SETUP_COUNT"; // SETUP_COUNT, SETUP_NAMES, PLAYING
+    let expectedNames = 0;
+
+    const statusEl = document.getElementById('status');
+    const scoreEl = document.getElementById('scoreboard');
+    const logEl = document.getElementById('log');
+    const micBtn = document.getElementById('micBtn');
+
+    // Sprachausgabe (TTS)
+    function speak(text) {
+        statusEl.innerText = text;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'de-DE';
+        window.speechSynthesis.speak(utterance);
+    }
+
+    // Spracherkennung (STT) initialisieren
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+        alert("Dein Browser unterstützt keine Sprachsteuerung. Bitte nutze Chrome oder Safari.");
+    }
+    const recognition = new Recognition();
+    recognition.lang = 'de-DE';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    micBtn.onclick = () => {
+        try { recognition.start(); logEl.innerText = "Höre zu..."; } catch(e) {}
+    };
+
+    recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript.toLowerCase();
+        logEl.innerText = `Erkannt: "${transcript}"`;
+        processInput(transcript);
+    };
+
+    function updateUI() {
+        scoreEl.innerHTML = '';
+        players.forEach((p, i) => {
+            const card = document.createElement('div');
+            card.className = `player-card ${gameState === 'PLAYING' && i === currentPlayerIndex ? 'active' : ''}`;
+            card.innerHTML = `<div>${p.name}</div><div class="score">${p.score}</div>`;
+            scoreEl.appendChild(card);
+        });
+    }
+
+    function processInput(input) {
+        // Extrahiere Zahlen aus dem Text
+        const numMatch = input.match(/\d+/);
+        const number = numMatch ? parseInt(numMatch[0]) : null;
+
+        if (gameState === "SETUP_COUNT") {
+            if (number) {
+                expectedNames = number;
+                gameState = "SETUP_NAMES";
+                speak(`Alles klar, ${number} Spieler. Wie heißt der erste Spieler?`);
+            } else {
+                speak("Wie viele Personen spielen mit?");
+            }
+        } 
+        else if (gameState === "SETUP_NAMES") {
+            players.push({ name: input, score: 501 });
+            if (players.length < expectedNames) {
+                speak(`Hallo ${input}. Wie heißt der nächste Spieler?`);
+            } else {
+                gameState = "PLAYING";
+                speak(`Viel Erfolg! ${players[0].name}, du fängst an. Dein Wurf?`);
+            }
+        } 
+        else if (gameState === "PLAYING") {
+            if (number !== null) {
+                let p = players[currentPlayerIndex];
+                if (number > 180) {
+                    speak("Das ist beim Dart nicht möglich. Sag die Punkte nochmal.");
+                    return;
+                }
+                
+                let oldScore = p.score;
+                p.score -= number;
+
+                if (p.score === 0) {
+                    speak(`Sieg! ${p.name} hat gewonnen!`);
+                    gameState = "FINISHED";
+                } else if (p.score < 0) {
+                    p.score = oldScore;
+                    speak(`Überworfen! Immer noch ${p.score}. Nächster Spieler.`);
+                    nextPlayer();
+                } else {
+                    speak(`${number} Punkte. ${p.name} hat noch ${p.score}.`);
+                    nextPlayer();
+                }
+            } else {
+                speak("Ich habe keine Zahl verstanden.");
+            }
+        }
+        updateUI();
+    }
+
+    function nextPlayer() {
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+        setTimeout(() => {
+            speak(`${players[currentPlayerIndex].name} ist dran. Dein Wurf?`);
+            updateUI();
+        }, 2000);
+    }
+</script>
+
+</body>
+</html>
